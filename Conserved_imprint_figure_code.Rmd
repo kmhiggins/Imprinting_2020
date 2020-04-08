@@ -1,0 +1,106 @@
+---
+title: "Conserved imprinting figure"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(tidyverse)
+```
+
+
+Creating the table to merge to compare data
+```{r}
+#Read in your table
+imprint_new <- read.table("feature_DE_ratio_table_imprinting_31Jan20.txt", sep = "\t", header = TRUE, stringsAsFactors = FALSE)
+imprint_new
+
+```
+
+```{r}
+#Convert from wide format to long format
+IC <- melt(imprint_new,id.vars = "ID")
+
+#Label TE vs Gene
+IC$feature_type <- ifelse(nchar(IC$ID) == 21, "TE", "gene") # Label features as TEs or genes
+
+#Label which genome the feature is defined in
+IC$genome <- ifelse(grepl("Zm00001d",IC$ID),"B73",ifelse(grepl("Zm00004b",IC$ID),"W22","PH207"))
+
+#Extract the contrast from the library name
+IC$contrast <- substr(IC$variable,0,2)
+
+#Use dplyr to summarize across the biological replicates and make a table that is useful for plotting; calculate standard error and add column
+
+IC2 <- data.frame(IC %>% group_by(ID,contrast) %>% 
+                    dplyr::summarize(
+                      mean.value = mean(value),
+                      SE = (sd(value) / sqrt(3))))
+
+IC2
+
+```
+
+
+Comparing and creating the figure from the data 
+```{r}
+my_data <- read.table("conserved_imprint_1_Feb11.txt", 
+                      sep = "\t", header=TRUE)
+
+good_data <- merge(my_data, IC2, by.x = "Feature", by.y = "ID", all = FALSE)
+
+#Separate Genome into individual data frames for the purpose of renaming contrasts
+B73 <- subset.data.frame(good_data, good_data$Genome == "B73")
+PH207 <- subset.data.frame(good_data, good_data$Genome == "PH207")
+W22 <- subset.data.frame(good_data, good_data$Genome == "W22")
+
+#Update contrast names to be easier to identify reciprocal contrasts. Added male female symbols in unicode
+B73$new_contrast <- ifelse(grepl("WB",B73$contrast),"BW \U2642", 
+                           ifelse(grepl("BP", B73$contrast),"PB \U2640",
+                                  ifelse(grepl("BW", B73$contrast),"BW \U2640",
+                                         ifelse(grepl("PW", B73$contrast),"WP", 
+                                                ifelse(grepl("WP", B73$contrast),"WP", "PB \U2642")))))
+
+PH207$new_contrast <- ifelse(grepl("WB",PH207$contrast),"BW", 
+                             ifelse(grepl("BP", PH207$contrast),"PB \U2642",
+                                    ifelse(grepl("BW", PH207$contrast),"BW",
+                                           ifelse(grepl("PW", PH207$contrast),"WP \U2640", 
+                                                  ifelse(grepl("WP", PH207$contrast),"WP \U2642", "PB \U2640")))))
+
+W22$new_contrast <- ifelse(grepl("WB",W22$contrast),"BW \U2640", 
+                           ifelse(grepl("BP", W22$contrast),"PB",
+                                  ifelse(grepl("BW", W22$contrast),"BW \U2642",
+                                         ifelse(grepl("PW", W22$contrast),"WP \U2642", 
+                                                ifelse(grepl("WP", W22$contrast),"WP \U2640", "PB")))))
+
+#put data frame back together 
+good_data <- bind_rows(B73, PH207, W22, .id=NULL)
+
+#Create new column combining genome and contrast
+good_data$Genome_contrast = paste(good_data$Genome, "-", good_data$new_contrast)
+
+good_data2 <- subset(good_data,(str_detect(good_data$new_contrast, substr(good_data$Genome,0,1))))
+
+#Define order in which contrasts and Genomes should be displayed
+good_data2$Genome_contrast <- factor(good_data2$Genome_contrast, levels=c("B73 - BW \U2640","B73 - PB \U2640", "PH207 - PB \U2640","PH207 - WP \U2640","W22 - WP \U2640", "W22 - BW \U2640","B73 - BW \U2642","B73 - PB \U2642", "PH207 - PB \U2642","PH207 - WP \U2642","W22 - WP \U2642", "W22 - BW \U2642"))
+
+#Separate data sets into MEG vs PEG
+MEG_data <- subset(good_data2, good_data2$Imprinted == "MEG")
+
+PEG_data <- subset(good_data2, good_data2$Imprinted == "PEG")
+
+#create individual figures from PEG/MEG data sets. Add error bar, change theme and colors of bars to be more visually pleasing. Rotate x axis labels
+M <- ggplot(data = MEG_data, aes(x=Genome_contrast, y=mean.value)) + geom_bar(stat ="identity", aes(fill = Imprinted )) + ylab("Relative Expression") + xlab("Contrast") +geom_errorbar( aes(x=Genome_contrast, ymin=mean.value-SE, ymax=mean.value+SE), width=0.3, colour="black", alpha=0.8, size=.4) + (scale_fill_manual("Imprinted", values = c("MEG" = "violetred4", "PEG" = "navyblue"))) + theme_minimal(base_size = 15) + theme(axis.text.x = element_text(face = "bold", angle= 45, hjust=1))  + facet_grid(Genename ~ ., scales = "free_y") 
+
+P<- ggplot(data = PEG_data, aes(x=Genome_contrast, y=mean.value)) + geom_bar(stat ="identity", aes(fill = Imprinted )) + ylab("Relative Expression") + xlab("Contrast") +geom_errorbar( aes(x=Genome_contrast, ymin=mean.value-SE, ymax=mean.value+SE), width=0.3, colour="black", alpha=0.8, size=.4) + (scale_fill_manual("Imprinted", values = c("MEG" = "violetred4", "PEG" = "navyblue"))) + theme_minimal(base_size = 15) + theme(axis.text.x = element_text(face = "bold", angle= 45, hjust=1))  + facet_grid(Genename ~ ., scales = "free_y") 
+
+M
+P
+```
